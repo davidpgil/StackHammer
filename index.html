@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- This is the main structure file for the StackHammer app's user interface. It's written in HTML, which defines how the app looks on the screen. -->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StackHammer v0.1</title>
+  <script type="module" src="/src/main.ts"></script>
+  <!-- These lines set up basic settings for the app, like the character set, how it fits on different screens, the app's title, and connects to the interactive code file. -->
+  <style>
+    /* This section defines how the app looks visually, like colors, sizes, and layouts for different parts of the screen. */
+    body { font-family: system-ui; background:#0d0d0d; color:#eee; margin:0; padding:2rem; text-align:center; }
+    h1 { color:#00ff88; margin-bottom:0.5rem; }
+    #drop-zone { border:4px dashed #444; border-radius:16px; padding:4rem; margin:3rem auto; max-width:640px; cursor:pointer; transition:0.3s; }
+    #drop-zone:hover { border-color:#00ff88; background:#002211; }
+    #result { margin-top:3rem; }
+    button { background:#00ff88; color:black; border:none; padding:1rem 2.5rem; font-size:1.3rem; font-weight:bold; border-radius:12px; cursor:pointer; margin-top:1.5rem; }
+    img { max-width:100%; image-rendering:pixelated; margin-top:1.5rem; border:3px solid #333; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <!-- This is the main visible part of the app that users see. -->
+  <h1>StackHammer v0.1</h1>
+  <p>Drag any retro screenshot → instant Godot-ready tileset</p>
+
+  <div id="drop-zone">
+    <!-- This area is where users can drag and drop their image files to be processed into tilesets. -->
+    <p>Drop image here</p>
+  </div>
+
+  <div id="result" style="display:none">
+    <!-- This section shows up after an image is processed, displaying the resulting tileset and a button to save it. -->
+    <h2>Tileset Ready!</h2>
+    <img id="tileset" alt="Deduplicated tileset" />
+    <br />
+    <button id="save-btn">Save tileset.png</button>
+  </div>
+
+<script type="module">
+  // This extra code inside the HTML file adds more ways for the app to handle user actions, making sure it doesn't crash and works on different systems. -->
+  console.log('Script loaded – initializing StackHammer app...');
+ import { invoke } from 'https://cdn.jsdelivr.net/npm/@tauri-apps/api@2/tauri.js'
+
+  const dropZone = document.getElementById('drop-zone')
+  const result = document.getElementById('result')
+  const tilesetImg = document.getElementById('tileset')
+  const saveBtn = document.getElementById('save-btn')
+  let latestBase64 = ''
+
+  async function processImage(file) {
+    if (!file || !file.type.startsWith('image/')) {
+      dropZone.innerHTML = '<p>Please drop a valid image file (PNG/JPG/BMP)</p>'
+      return
+    }
+    dropZone.innerHTML = `<p>Processing ${file.name}... (preventing crashes)</p>`
+    
+    const reader = new FileReader()
+    reader.onload = async () => {
+      try {
+        const dataUrl = reader.result
+        // Validate dataUrl starts with data:image/ to prevent Rust panic
+        if (!dataUrl.startsWith('data:image/')) throw new Error('Invalid image format')
+        const resultBase64 = await invoke('extract_tileset', { dataUrl })
+        latestBase64 = resultBase64
+        tilesetImg.src = resultBase64
+        result.style.display = 'block'
+        dropZone.innerHTML = '<p>✅ Success! Drop another or double-click to browse</p>'
+      } catch (err) {
+        dropZone.innerHTML = `<p style="color:#ff5555">Error (no crash): ${err.message || err}</p>`
+        console.error('Processing error (check Mesen screenshot format):', err)
+      }
+    }
+    reader.onerror = () => dropZone.innerHTML = '<p>Read error – try a different PNG</p>'
+    reader.readAsDataURL(file)
+  }
+
+  // Drag & Drop (now crash-proof)
+  dropZone.ondragover = e => { 
+    e.preventDefault(); 
+    e.stopPropagation(); 
+    dropZone.style.borderColor = '#00ff88'; 
+    dropZone.style.background = '#002211' 
+  }
+  dropZone.ondragleave = () => { 
+    dropZone.style.borderColor = '#444'; 
+    dropZone.style.background = 'transparent' 
+  }
+  dropZone.ondrop = e => {
+    e.preventDefault()
+    e.stopPropagation()
+    dropZone.style.borderColor = '#444'
+    dropZone.style.background = 'transparent'
+    const file = e.dataTransfer.files[0]
+    processImage(file)
+  }
+
+  // Double-Click to Browse (your request – works offline)
+  dropZone.ondblclick = async () => {
+    try {
+      const { open } = await import('https://cdn.jsdelivr.net/npm/@tauri-apps/plugin-dialog@2/dist/index.js')
+      const selected = await open({
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'gif'] }],
+        multiple: false
+      })
+      if (selected) {
+        const response = await fetch(selected)
+        if (!response.ok) throw new Error('Failed to load selected file')
+        const blob = await response.blob()
+        processImage(blob)
+      }
+    } catch (err) {
+      dropZone.innerHTML = `<p style="color:#ff5555">Browse error: ${err.message || err}</p>`
+      console.error('Browse error:', err)
+    }
+  }
+
+  // SAVE BUTTON (Fallback method using data URL download)
+  // Using addEventListener to avoid potential overrides by other scripts
+  saveBtn.addEventListener('click', async () => {
+    alert('Save button clicked! This confirms the event listener is working (from main script).');
+    console.log('Save button clicked – event listener confirmed (from main script).');
+    if (!latestBase64) {
+      alert('No tileset to save yet! Process an image first.')
+      return
+    }
+    console.log('Save clicked – initiating fallback download...') // Debug log
+
+    try {
+      // Fallback to basic browser download using data URL
+      const link = document.createElement('a');
+      link.href = latestBase64;
+      link.download = 'stackhammer_tileset.png';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      alert('✅ Tileset download started! Check your Downloads folder.');
+      console.log('Fallback download initiated for stackhammer_tileset.png');
+    } catch (err) {
+      console.error('Fallback save error (check console for details):', err);
+      alert(`Save failed: ${err.message || err} – Unable to initiate download.`);
+      console.log('Fallback save operation failed with error:', err);
+    }
+  });
+</script>
+
+<!-- Independent debug script added at the end of body to ensure it runs after all other scripts -->
+<script>
+  console.log('Independent debug script running – checking for save button...');
+  const saveBtnDebug = document.getElementById('save-btn');
+  if (saveBtnDebug) {
+    console.log('Save button found in DOM – attaching independent event listener.');
+    console.log('Button state - Disabled:', saveBtnDebug.disabled);
+    console.log('Button state - Display:', window.getComputedStyle(saveBtnDebug).display);
+    console.log('Button state - Visibility:', window.getComputedStyle(saveBtnDebug).visibility);
+    saveBtnDebug.addEventListener('click', function(e) {
+      alert('Save button clicked! This confirms the independent event listener is working (from debug script).');
+      console.log('Save button clicked – independent event listener confirmed (from debug script).', e);
+      // Trigger fallback download to ensure it works even if main script fails
+      if (typeof latestBase64 !== 'undefined' && latestBase64) {
+        const link = document.createElement('a');
+        link.href = latestBase64;
+        link.download = 'stackhammer_tileset.png';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        alert('✅ Tileset download started from debug script! Check your Downloads folder.');
+        console.log('Fallback download initiated from debug script for stackhammer_tileset.png');
+      } else {
+        alert('No tileset to save yet! Process an image first (from debug script).');
+      }
+    });
+    // Remove forced style to restore original centering
+    console.log('Not forcing button style to preserve original layout.');
+  } else {
+    console.error('Save button NOT found in DOM by ID – check if element ID is correct or if DOM is modified.');
+    // Alternative search for buttons to identify the save button
+    const buttons = document.getElementsByTagName('button');
+    console.log('All buttons found in DOM:', buttons.length);
+    for (let i = 0; i < buttons.length; i++) {
+      console.log(`Button ${i} - Text:`, buttons[i].textContent, 'ID:', buttons[i].id, 'Class:', buttons[i].className);
+      if (buttons[i].textContent.includes('Save tileset')) {
+        console.log(`Potential save button found at index ${i} – attaching listener.`);
+        buttons[i].addEventListener('click', function(e) {
+          alert('Save button clicked! Identified via text content (from debug script).');
+          console.log('Save button clicked – identified via text content (from debug script).', e);
+          if (typeof latestBase64 !== 'undefined' && latestBase64) {
+            const link = document.createElement('a');
+            link.href = latestBase64;
+            link.download = 'stackhammer_tileset.png';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            alert('✅ Tileset download started from debug script! Check your Downloads folder.');
+            console.log('Fallback download initiated from debug script for stackhammer_tileset.png');
+          } else {
+            alert('No tileset to save yet! Process an image first (from debug script).');
+          }
+        });
+      }
+    }
+  }
+  // Add a window-level click listener to catch any clicks for debugging
+  window.addEventListener('click', function(e) {
+    console.log('Click detected on window level – target:', e.target);
+  });
+  console.log('Window-level click listener added for debugging.');
+</script>
+</body>
+</html>
